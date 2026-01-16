@@ -7,157 +7,205 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
+  Modal,
 } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { LinearGradient } from "expo-linear-gradient";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { auth } from "../firebase/config";
 
 const ForgotPasswordScreen = ({ navigation }) => {
-  const [emailOrId, setEmailOrId] = useState("");
+  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showModal, setShowModal] = useState(true);
 
   const handleResetPassword = async () => {
-    if (!emailOrId) {
-      Alert.alert("Required", "Please enter your email or student ID.");
+    if (!email.trim()) {
+      Alert.alert("Required", "Please enter your ID number or email address.");
       return;
     }
 
+    const normalizedEmail = email.trim().toLowerCase();
     setLoading(true);
+
     try {
-      const response = await fetch("http://localhost:5003/api/auth/forgot-password", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ identifier: emailOrId }),
-      });
+      console.log("📧 Sending reset email to:", normalizedEmail);
 
-      const data = await response.json();
+      await sendPasswordResetEmail(auth, normalizedEmail);
 
-      if (response.ok && data.success) {
-        Alert.alert("Success", "Reset instructions sent to your email.");
-        navigation.goBack();
-      } else {
-        Alert.alert("Error", data.message || "Something went wrong.");
-      }
+      Alert.alert(
+        "Success ✅",
+        "If this email exists in our system, a password reset link has been sent to your inbox.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              setShowModal(false);
+              navigation.goBack();
+            }
+          }
+        ]
+      );
     } catch (err) {
-      console.error("Forgot Password Error:", err);
-      Alert.alert("Error", "Could not connect to server.");
+      console.error("❌ Forgot Password Error:", err);
+
+      let message = "Something went wrong. Please try again later.";
+
+      switch (err.code) {
+        case "auth/user-not-found":
+          message = "No account found with this email.";
+          break;
+        case "auth/invalid-email":
+          message = "Invalid email format.";
+          break;
+        case "auth/network-request-failed":
+          message = "Network error. Please check your internet connection.";
+          break;
+        case "auth/too-many-requests":
+          message = "Too many attempts. Try again in a few minutes.";
+          break;
+      }
+
+      Alert.alert("Error", message);
     } finally {
       setLoading(false);
     }
   };
 
+  const handleCancel = () => {
+    setShowModal(false);
+    navigation.goBack();
+  };
+
   return (
-    <LinearGradient colors={["#eef2f3", "#d4dde1"]} style={styles.gradient}>
-      <KeyboardAvoidingView
-        style={styles.container}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
-        <View style={styles.card}>
-          <Text style={styles.title}>Forgot Password</Text>
+    <Modal
+      visible={showModal}
+      animationType="fade"
+      transparent={true}
+      onRequestClose={handleCancel}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          {/* Title */}
+          <Text style={styles.title}>Reset password</Text>
+
+          {/* Instructions */}
           <Text style={styles.instructions}>
-            Enter your registered email or student ID and we’ll send you reset instructions.
+            Enter your ID number or registered email to receive a verification code.
           </Text>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color="#555" style={styles.icon} />
-            <TextInput
-              style={styles.input}
-              placeholder="Email or Student ID"
-              value={emailOrId}
-              onChangeText={setEmailOrId}
-              autoCapitalize="none"
-            />
+          {/* Input Field */}
+          <TextInput
+            style={styles.input}
+            placeholder="ID Number or Email"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholderTextColor="#999"
+          />
+
+          {/* Action Buttons */}
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={handleCancel}
+              disabled={loading}
+            >
+              <Text style={styles.cancelButtonText}>CANCEL</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.sendButton, loading && { opacity: 0.8 }]}
+              onPress={handleResetPassword}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.sendButtonText}>SEND RESET EMAIL</Text>
+              )}
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            style={styles.resetButton}
-            onPress={handleResetPassword}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.resetText}>Send Reset Link</Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backToLogin}>← Back to Login</Text>
-          </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
-    </LinearGradient>
+      </View>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  gradient: {
+  modalOverlay: {
     flex: 1,
-  },
-  container: {
-    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
     justifyContent: "center",
     alignItems: "center",
-    padding: 20,
+    paddingHorizontal: 20,
   },
-  card: {
-    width: "100%",
+  modalContainer: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 25,
+    borderRadius: 12,
+    padding: 30,
+    width: "100%",
+    maxWidth: 500,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   title: {
     fontSize: 24,
-    fontWeight: "700",
-    textAlign: "center",
-    marginBottom: 8,
-    color: "#222",
-  },
-  instructions: {
-    fontSize: 14,
-    color: "#555",
-    textAlign: "center",
-    marginBottom: 25,
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#f4f4f4",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: "#ccc",
-  },
-  icon: {
-    marginRight: 8,
-  },
-  input: {
-    flex: 1,
-    height: 45,
-  },
-  resetButton: {
-    backgroundColor: "#007BFF",
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: "center",
+    fontWeight: "bold",
+    color: "#000",
     marginBottom: 15,
   },
-  resetText: {
-    color: "#fff",
-    fontSize: 16,
+  instructions: {
+    fontSize: 15,
+    color: "#333",
+    lineHeight: 22,
+    marginBottom: 25,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#ccc",
+    borderRadius: 6,
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: "#000",
+    marginBottom: 25,
+    backgroundColor: "#fff",
+  },
+  buttonContainer: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  cancelButton: {
+    backgroundColor: "#f0f0f0",
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 6,
+    minWidth: 100,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#ddd",
+  },
+  cancelButtonText: {
+    color: "#333",
+    fontSize: 14,
     fontWeight: "600",
   },
-  backToLogin: {
-    color: "#007BFF",
-    textAlign: "center",
+  sendButton: {
+    backgroundColor: "#006d3c",
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 6,
+    minWidth: 180,
+    alignItems: "center",
+  },
+  sendButtonText: {
+    color: "#fff",
     fontSize: 14,
+    fontWeight: "600",
   },
 });
 
