@@ -27,6 +27,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="enrollmentapp"/>
+        <data android:scheme="com.enrollease.enrollmentapp"/>
         <data android:scheme="exp+enrollmentapp"/>
       </intent-filter>
     </activity>

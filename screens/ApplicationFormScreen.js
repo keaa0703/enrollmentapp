@@ -33,7 +33,7 @@ import {
   updateDoc,
   onSnapshot,
   getDoc,
-  query,
+  query,  
   where,
   getDocs,
 } from "firebase/firestore";
@@ -89,6 +89,11 @@ const ApplicationFormScreen = () => {
   const [programOpen, setProgramOpen] = useState(false);
   const [genderOpen, setGenderOpen] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
+
+  // Email validation states
+  const [emailExists, setEmailExists] = useState(false);
+  const [emailCheckLoading, setEmailCheckLoading] = useState(false);
+  
 
   const [categoryItems] = useState([
     { label: "New Student", value: "New Student" },
@@ -280,6 +285,48 @@ useEffect(() => {
     };
   }, []);
 
+  // Real-time email validation (like web version)
+  useEffect(() => {
+    const checkEmailAvailability = async () => {
+      // Don't check if email is empty or invalid format
+      if (!form.email || !isValidEmail(form.email)) {
+        setEmailExists(false);
+        return;
+      }
+
+      setEmailCheckLoading(true);
+      
+      try {
+        const studentDocId = await AsyncStorage.getItem("studentDocId");
+        const q = query(collection(db, "students"), where("email", "==", form.email));
+        const snapshot = await getDocs(q);
+        
+        if (!snapshot.empty) {
+          const existingDoc = snapshot.docs[0];
+          // Allow if it's the same student updating
+          if (!studentDocId || existingDoc.id !== studentDocId) {
+            setEmailExists(true);
+          } else {
+            setEmailExists(false);
+          }
+        } else {
+          setEmailExists(false);
+        }
+      } catch (error) {
+        console.error("Error checking email:", error);
+      } finally {
+        setEmailCheckLoading(false);
+      }
+    };
+
+    // Debounce - wait 800ms after user stops typing
+    const timeoutId = setTimeout(() => {
+      checkEmailAvailability();
+    }, 800);
+
+    return () => clearTimeout(timeoutId);
+  }, [form.email]);
+
   const saveDraft = async (partial) => {
     try {
       const next = { ...form, ...partial };
@@ -321,8 +368,9 @@ useEffect(() => {
   };
 
   const handleEmailChange = (value) => {
-    handleChange("email", value.toLowerCase());
-  };
+  handleChange("email", value.toLowerCase());
+  setEmailExists(false); // Reset when user types
+};
 
   const isValidEmail = (email) => {
     return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
@@ -506,13 +554,23 @@ useEffect(() => {
       }
 
       if (!isValidEmail(form.email)) {
-        Alert.alert("Invalid Email", "Please enter a valid email");
-        setLoading(false);
-        return;
-      }
+  Alert.alert("Invalid Email", "Please enter a valid email");
+  setLoading(false);
+  return;
+}
 
-      // Check required files (unless hardcopy flag is set)
-      const fileFields = ["picture", "birthCert", "schoolId", "grades"];
+// Block submission if email already exists (from real-time check)
+if (emailExists) {
+  Alert.alert(
+    "⚠️ Email Already Registered",
+    `The email "${form.email}" is already associated with an existing application.\n\nPlease use a different email address or contact support if you believe this is an error.`
+  );
+  setLoading(false);
+  return;
+}
+
+// Check required files (unless hardcopy flag is set)
+const fileFields = ["picture", "birthCert", "schoolId", "grades"];
       const hardcopyMap = {
         picture: hardcopyFlags.pictureHardcopy,
         birthCert: hardcopyFlags.birthCertHardcopy,
@@ -535,6 +593,7 @@ useEffect(() => {
       // Check for duplicate email in Firebase
       console.log("🔍 Checking if email already exists in Firebase...");
       console.log("Email to check:", form.email);
+      
       
       try {
         const q = query(collection(db, "students"), where("email", "==", form.email));
@@ -1075,15 +1134,33 @@ if (!auth.currentUser) {
 
         <Text style={styles.label}>Email *</Text>
         <TextInput
-          style={styles.input}
+          style={[
+            styles.input,
+            emailExists && { borderColor: '#dc3545', borderWidth: 2 },
+            form.email && isValidEmail(form.email) && !emailExists && { borderColor: '#28a745', borderWidth: 1.5 }
+          ]}
           value={form.email}
           onChangeText={handleEmailChange}
           placeholder="example@gmail.com"
           keyboardType="email-address"
           autoCapitalize="none"
         />
+        {emailCheckLoading && (
+          <View style={styles.emailCheckContainer}>
+            <ActivityIndicator size="small" color="#007bff" />
+            <Text style={styles.emailCheckText}>Checking email availability...</Text>
+          </View>
+        )}
         {form.email && !isValidEmail(form.email) && (
           <Text style={styles.errorText}>Invalid email format</Text>
+        )}
+        {emailExists && (
+          <Text style={[styles.errorText, { fontWeight: '700' }]}>
+            ⚠️ This email is already registered. Please use a different email.
+          </Text>
+        )}
+        {form.email && isValidEmail(form.email) && !emailExists && !emailCheckLoading && (
+          <Text style={styles.successText}>✓ Email is available</Text>
         )}
 
         <View style={styles.uploadNoticeBox}>
@@ -1313,6 +1390,26 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 15,
     backgroundColor: "#fff",
+  },
+  successText: {
+    color: "#28a745",
+    fontSize: 12,
+    marginTop: -10,
+    marginBottom: 10,
+    fontWeight: "600",
+  },
+  emailCheckContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: -10,
+    marginBottom: 10,
+    paddingVertical: 5,
+  },
+  emailCheckText: {
+    marginLeft: 8,
+    fontSize: 12,
+    color: "#007bff",
+    fontStyle: "italic",
   },
 });
 

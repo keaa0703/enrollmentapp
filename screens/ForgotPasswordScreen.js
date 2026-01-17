@@ -32,8 +32,7 @@ const ForgotPasswordScreen = ({ navigation }) => {
       await sendPasswordResetEmail(auth, normalizedEmail);
 
       Alert.alert(
-        "Success ✅",
-        "If this email exists in our system, a password reset link has been sent to your inbox.",
+        "Password reset email sent. Check your inbox (or spam)..",
         [
           {
             text: "OK",

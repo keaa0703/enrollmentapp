@@ -1,13 +1,13 @@
 {
   "expo": {
     "name": "EnrollmentApp",
-    "slug": "EnrollmentApp",
+    "slug": "enrollmentapp",
     "version": "1.0.0",
+    "sdkVersion": "54.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/logo1.jpg",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
-    "scheme": "enrollmentapp",
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -35,11 +35,10 @@
     },
     "extra": {
       "eas": {
-        "projectId": "090040b7-d76e-4d2f-8a4a-970d797d9616"
+        "projectId": "e9c2ecb5-0744-4ed7-8175-230c0573083a"
       }
     },
     "plugins": [
-      "expo-system-ui",
       [
         "expo-build-properties",
         {

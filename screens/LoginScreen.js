@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Linking,
   Modal,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -19,6 +20,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db, auth } from "../firebase/config";
 import { sendPasswordResetEmail } from "firebase/auth";
 import CheckBox from 'expo-checkbox';
+import { updateDoc, addDoc } from "firebase/firestore";
 
 const LoginScreen = ({ navigation }) => {
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -33,7 +35,7 @@ const LoginScreen = ({ navigation }) => {
 
   // Forgot Password states
   const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
-  const [resetEmail, setResetEmail] = useState("");
+  const [resetEmailOrId, setResetEmailOrId] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
 
   const openUserGuide = () => {
@@ -127,71 +129,192 @@ const LoginScreen = ({ navigation }) => {
     }
   };
 
-  const handleResetPassword = async () => {
-    if (!resetEmail.trim()) {
-      Alert.alert("Required", "Please enter your registered email address.");
-      return;
-    }
+  // Add this function to handle custom password reset
+const handleResetPassword = async () => {
+  if (!resetEmailOrId.trim()) {
+    Alert.alert("Required", "Please enter your email address or student ID.");
+    return;
+  }
 
-    const normalizedEmail = resetEmail.trim().toLowerCase();
-    
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(normalizedEmail)) {
-      Alert.alert("Invalid Email", "Please enter a valid email address.");
-      return;
-    }
+  const inputValue = resetEmailOrId.trim();
+  setResetLoading(true);
 
-    setResetLoading(true);
+  try {
+    console.log("🔍 Searching for:", inputValue);
 
-    try {
-      console.log("📧 Sending reset email to:", normalizedEmail);
+    const studentsRef = collection(db, "students");
+    let studentFound = null;
+    let studentEmail = null;
 
-      await sendPasswordResetEmail(auth, normalizedEmail);
+    // Check if input is an email (contains @)
+    const isEmail = inputValue.includes("@");
 
-      Alert.alert(
-        "Success ✅",
-        "If this email exists in our system, a password reset link has been sent to your inbox.",
-        [
-          {
-            text: "OK",
-            onPress: () => {
-              setShowForgotPasswordModal(false);
-              setResetEmail("");
-            }
-          }
-        ]
-      );
-    } catch (err) {
-      console.error("❌ Forgot Password Error:", err);
-
-      let message = "Something went wrong. Please try again later.";
-
-      switch (err.code) {
-        case "auth/user-not-found":
-          message = "No account found with this email.";
-          break;
-        case "auth/invalid-email":
-          message = "Invalid email format.";
-          break;
-        case "auth/network-request-failed":
-          message = "Network error. Please check your internet connection.";
-          break;
-        case "auth/too-many-requests":
-          message = "Too many attempts. Try again in a few minutes.";
-          break;
+    if (isEmail) {
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(inputValue.toLowerCase())) {
+        Alert.alert("Invalid Email", "Please enter a valid email address.");
+        setResetLoading(false);
+        return;
       }
 
-      Alert.alert("Error", message);
-    } finally {
-      setResetLoading(false);
+      // Search by email
+      const normalizedEmail = inputValue.toLowerCase();
+      const qEmail = query(studentsRef, where("email", "==", normalizedEmail));
+      const emailResults = await getDocs(qEmail);
+
+      if (emailResults.size > 0) {
+        studentFound = emailResults.docs[0].data();
+        studentEmail = normalizedEmail;
+        console.log("✅ Student found by email:", studentFound.studentId);
+      }
+    } else {
+      // Search by student ID
+      const qId = query(studentsRef, where("studentId", "==", inputValue));
+      const idResults = await getDocs(qId);
+
+      if (idResults.size > 0) {
+        studentFound = idResults.docs[0].data();
+        studentEmail = studentFound.email;
+        console.log("✅ Student found by ID:", studentFound.studentId);
+      }
     }
-  };
+
+    // If student not found
+    if (!studentFound || !studentEmail) {
+      Alert.alert(
+        "Not Found",
+        `No account found with this ${isEmail ? "email address" : "student ID"}. Please check and try again.`
+      );
+      setResetLoading(false);
+      return;
+    }
+
+    // Verify student has an email registered
+    if (!studentEmail || studentEmail === "") {
+      Alert.alert(
+        "No Email Registered",
+        "This account doesn't have an email address registered. Please contact the administrator at info@mac.edu.ph for assistance."
+      );
+      setResetLoading(false);
+      return;
+    }
+
+    console.log("📧 Student verified. Sending reset email to:", studentEmail);
+
+    // Send password reset email using Firebase Auth
+    await sendPasswordResetEmail(auth, studentEmail);
+    
+    Alert.alert(
+      "Success ✅",
+      `Password reset instructions have been sent to:\n\n${studentEmail}\n\nPlease check your inbox and spam folder.`,
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            setShowForgotPasswordModal(false);
+            setResetEmailOrId("");
+          }
+        }
+      ]
+    );
+
+  } catch (err) {
+    console.error("❌ Password Reset Error:", err);
+
+    let message = "Something went wrong. Please try again later.";
+
+    switch (err.code) {
+      case "auth/user-not-found":
+        message = "This email is not registered in our authentication system. Please contact admin at info@mac.edu.ph";
+        break;
+      case "auth/invalid-email":
+        message = "Invalid email format.";
+        break;
+      case "auth/network-request-failed":
+        message = "Network error. Please check your internet connection.";
+        break;
+      case "auth/too-many-requests":
+        message = "Too many attempts. Please try again in a few minutes.";
+        break;
+    }
+
+    Alert.alert("Error", message);
+  } finally {
+    setResetLoading(false);
+  }
+};
+
+// Alternative: Email verification approach
+const handleResetPasswordWithEmailLink = async () => {
+  if (!resetEmail.trim()) {
+    Alert.alert("Required", "Please enter your registered email address.");
+    return;
+  }
+
+  const normalizedEmail = resetEmail.trim().toLowerCase();
+  
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(normalizedEmail)) {
+    Alert.alert("Invalid Email", "Please enter a valid email address.");
+    return;
+  }
+
+  setResetLoading(true);
+
+  try {
+    // Check if email exists in database
+    const studentsRef = collection(db, "students");
+    const qEmail = query(studentsRef, where("email", "==", normalizedEmail));
+    const emailResults = await getDocs(qEmail);
+
+    // Always show the same message for security
+    Alert.alert(
+      "Request Submitted",
+      "If this email is registered, you will receive instructions to reset your password. Please contact the school administrator at info@mac.edu.ph",
+      [
+        {
+          text: "OK",
+          onPress: () => {
+            setShowForgotPasswordModal(false);
+            setResetEmail("");
+          }
+        }
+      ]
+    );
+
+    // If email exists, log it for admin to handle
+    if (emailResults.size > 0) {
+      const studentData = emailResults.docs[0].data();
+      console.log("Password reset requested for:", {
+        studentId: studentData.studentId,
+        email: normalizedEmail,
+        name: `${studentData.firstName} ${studentData.lastName}`,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Optionally store the reset request in Firestore
+      const resetRequestsRef = collection(db, "passwordResetRequests");
+      await addDoc(resetRequestsRef, {
+        studentId: studentData.studentId,
+        email: normalizedEmail,
+        requestDate: new Date().toISOString(),
+        status: "pending"
+      });
+    }
+
+  } catch (err) {
+    console.error("❌ Error:", err);
+    Alert.alert("Error", "Please try again or contact support.");
+  } finally {
+    setResetLoading(false);
+  }
+};
 
   const handleCloseForgotPassword = () => {
-    setShowForgotPasswordModal(false);
-    setResetEmail("");
-  };
+  setShowForgotPasswordModal(false);
+  setResetEmailOrId("");
+};
 
   const handleApplyNow = () => {
     setShowTermsModal(true);
@@ -284,56 +407,55 @@ const LoginScreen = ({ navigation }) => {
   );
 
   const renderForgotPasswordModal = () => (
-    <Modal
-      visible={showForgotPasswordModal}
-      animationType="fade"
-      transparent={true}
-      onRequestClose={handleCloseForgotPassword}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.forgotPasswordContainer}>
-          <Text style={styles.forgotPasswordTitle}>Reset password</Text>
+  <Modal
+    visible={showForgotPasswordModal}
+    animationType="fade"
+    transparent={true}
+    onRequestClose={handleCloseForgotPassword}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.forgotPasswordContainer}>
+        <Text style={styles.forgotPasswordTitle}>Reset Password</Text>
 
-          <Text style={styles.forgotPasswordInstructions}>
-            Enter your registered email address to receive a password reset link.
-          </Text>
+        <Text style={styles.forgotPasswordInstructions}>
+          Enter your registered email address or student ID number to reset your password.
+        </Text>
 
-          <TextInput
-            style={styles.forgotPasswordInput}
-            placeholder="Email Address"
-            value={resetEmail}
-            onChangeText={setResetEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholderTextColor="#999"
-            autoCorrect={false}
-          />
+        <TextInput
+          style={styles.forgotPasswordInput}
+          placeholder="Email Address or Student ID"
+          value={resetEmailOrId}
+          onChangeText={setResetEmailOrId}
+          autoCapitalize="none"
+          placeholderTextColor="#999"
+          autoCorrect={false}
+        />
 
-          <View style={styles.forgotPasswordButtons}>
-            <TouchableOpacity
-              style={styles.forgotCancelButton}
-              onPress={handleCloseForgotPassword}
-              disabled={resetLoading}
-            >
-              <Text style={styles.forgotCancelButtonText}>CANCEL</Text>
-            </TouchableOpacity>
+        <View style={styles.forgotPasswordButtons}>
+          <TouchableOpacity
+            style={styles.forgotCancelButton}
+            onPress={handleCloseForgotPassword}
+            disabled={resetLoading}
+          >
+            <Text style={styles.forgotCancelButtonText}>CANCEL</Text>
+          </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.forgotSendButton, resetLoading && { opacity: 0.8 }]}
-              onPress={handleResetPassword}
-              disabled={resetLoading}
-            >
-              {resetLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.forgotSendButtonText}>SEND RESET EMAIL</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.forgotSendButton, resetLoading && { opacity: 0.8 }]}
+            onPress={handleResetPassword}
+            disabled={resetLoading}
+          >
+            {resetLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.forgotSendButtonText}>RESET PASSWORD</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
-    </Modal>
-  );
+    </View>
+  </Modal>
+);
 
   const renderTermsModal = () => (
     <Modal
@@ -401,6 +523,7 @@ const LoginScreen = ({ navigation }) => {
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         {/* Hero Section */}
         <View style={styles.heroSection}>
+          
           <Text style={styles.mainTitle}>EnrollEase</Text>
           <Text style={styles.subtitle}>Manila Adventist College</Text>
           <Text style={styles.tagline}>
@@ -474,6 +597,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingVertical: 60,
     paddingHorizontal: 20,
+  },
+  logo: {
+    width: 120,
+    height: 120,
+    marginBottom: 30,
+    borderRadius: 15,
   },
   mainTitle: {
     fontSize: 56,
