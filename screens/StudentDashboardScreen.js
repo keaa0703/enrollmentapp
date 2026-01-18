@@ -1896,6 +1896,7 @@ const StudentDashboard = ({ route, navigation }) => {
 const handleDownloadCertificate = async () => {
   try {
     console.log("=== Certificate Download Started ===");
+    console.log("Student ID:", profile?.idNumber);
     
     // Check multiple possible field names for the certificate
     let downloadUrl = null;
@@ -1940,6 +1941,7 @@ const handleDownloadCertificate = async () => {
       Alert.alert(
         "Certificate Not Available",
         `Your Certificate of Registration is not yet generated.\n\n` +
+        `Student ID: ${profile?.idNumber || 'Unknown'}\n` +
         `Payment Status: ${profile?.paymentStatus || 'Unknown'}\n` +
         `Registration Status: ${profile?.registrationStatus || 'Unknown'}\n\n` +
         `Please contact the admin if you have already completed payment.`
@@ -1976,10 +1978,9 @@ const handleDownloadCertificate = async () => {
       return;
     }
 
-    console.log("Certificate URL ready:", downloadUrl);
+    console.log("Certificate URL ready, opening...");
 
-    // SIMPLEST APPROACH: Just open in browser/PDF viewer
-    // This works on all platforms without complex downloads
+    // Open URL in browser/PDF viewer
     const canOpen = await Linking.canOpenURL(downloadUrl);
     
     if (canOpen) {
@@ -1995,48 +1996,17 @@ const handleDownloadCertificate = async () => {
         [{ text: "Got it!" }]
       );
     } else {
-      throw new Error("Cannot open URL");
+      throw new Error("Cannot open URL on this device");
     }
 
   } catch (error) {
-    console.error("Certificate error:", error);
+    console.error("Certificate download error:", error);
     
-    // Fallback: Show URL to user
     Alert.alert(
-      "Certificate Ready",
-      "Click 'Open Certificate' to view and download your Certificate of Registration.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Open Certificate",
-          onPress: async () => {
-            try {
-              // Try all possible URL fields
-              let viewUrl = profile?.certificateUrl || 
-                           profile?.corUrl || 
-                           profile?.corPdfUrl ||
-                           profile?.certificate ||
-                           profile?.cor;
-              
-              // If still no URL, try getting from path
-              if (!viewUrl && (profile?.certificatePath || profile?.corPath)) {
-                const path = profile?.certificatePath || profile?.corPath;
-                const certRef = storageRef(storage, path);
-                viewUrl = await getDownloadURL(certRef);
-              }
-              
-              if (viewUrl) {
-                await Linking.openURL(viewUrl);
-              } else {
-                Alert.alert("Error", "Certificate URL not found. Please contact admin.");
-              }
-            } catch (err) {
-              console.error("Error opening URL:", err);
-              Alert.alert("Error", "Failed to open certificate. Please contact support.");
-            }
-          }
-        }
-      ]
+      "Unable to Open Certificate",
+      error.message || "An error occurred while trying to open your certificate.\n\n" +
+      "Please try again or contact support if the problem persists.",
+      [{ text: "OK" }]
     );
   }
 };
@@ -3086,31 +3056,32 @@ profileImagePlaceholder: {
   tableRow: { 
     flexDirection: 'row', 
     borderBottomWidth: 1, 
-    borderColor: '#eee', 
-    paddingVertical: 10
+    borderColor: '#ddd', 
+    paddingVertical: 8,
   },
   tableHeader: { 
     backgroundColor: '#f9f9f9',
-    paddingVertical: 12,
+    paddingVertical: 10,
   },  
   tableHeaderCell: { 
     flex: 1, 
-    fontWeight: 'bold', 
-    fontSize: 12, 
-    color: '#333',
-    paddingHorizontal: 8,
+    fontWeight: '700', 
+    fontSize: 11, 
+    color: '#000',
+    paddingHorizontal: 6,
   },
-  tableCell: { 
+   tableCell: { 
     flex: 1, 
-    fontSize: 12, 
+    fontSize: 11, 
     color: '#333',
-    paddingHorizontal: 8,
+    paddingHorizontal: 6,
     paddingVertical: 4,
   },
   tableFooter: {
-    backgroundColor: '#f1f1f1', 
-    paddingVertical: 8, 
-    justifyContent: 'center' 
+    backgroundColor: '#f5f5f5', 
+    paddingVertical: 10,
+    borderTopWidth: 2,
+    borderTopColor: '#000',
   },
   dropdown: {
     borderWidth: 1,
@@ -3288,10 +3259,9 @@ profileImagePlaceholder: {
     borderTopColor: '#000',
   },
   installmentTotalLabel: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '700',
     color: '#000',
-    flex: 1,
   },
   noteSection: {
     backgroundColor: '#fff8e1',
@@ -3365,178 +3335,192 @@ profileImagePlaceholder: {
     borderTopWidth: 2,
     borderTopColor: '#e0e0e0',
     paddingTop: 25,
+    backgroundColor: '#fff',
+    paddingHorizontal: 0,
   },
   certHeader: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    color: '#18803b',
+    color: '#006d3c',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
+    letterSpacing: 0.5,
   },
   certSubheader: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     textAlign: 'center',
-    color: '#333',
-    marginBottom: 8,
+    color: '#000',
+    marginBottom: 6,
+    letterSpacing: 0.3,
   },
   certAY: {
-    fontSize: 14,
+    fontSize: 13,
     textAlign: 'center',
-    color: '#666',
-    marginBottom: 25,
+    color: '#333',
+    marginBottom: 20,
+    fontWeight: '500',
   },
   certInfo: {
     marginBottom: 25,
     paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ddd',
+    paddingBottom: 20,
   },
-  certInfoText: {
-    fontSize: 14,
+   certInfoText: {
+    fontSize: 13,
     color: '#333',
-    marginBottom: 8,
-    lineHeight: 22,
+    marginBottom: 6,
+    lineHeight: 20,
+    fontWeight: '500',
   },
-  certInfoLabel: {
-    fontWeight: '600',
+   certInfoLabel: {
+    fontWeight: '700',
+    color: '#000',
   },
   certSectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#333',
-    marginTop: 20,
+    color: '#000',
+    marginTop: 25,
     marginBottom: 15,
+    paddingHorizontal: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   certTable: {
     marginBottom: 15,
+    paddingHorizontal: 10,
   },
   certNotice: {
-    backgroundColor: '#fff8e1',
-    borderWidth: 1,
-    borderColor: '#ffa000',
-    borderRadius: 6,
-    padding: 20,
+    backgroundColor: '#fffbeb',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    borderRadius: 4,
+    padding: 15,
     marginTop: 25,
+    marginHorizontal: 10,
   },
   certNoticeTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#e65100',
-    marginBottom: 10,
+    color: '#b45309',
+    marginBottom: 8,
   },
   certNoticeText: {
-    fontSize: 13,
+    fontSize: 11,
     color: '#333',
-    lineHeight: 22,
+    lineHeight: 18,
+    fontWeight: '400',
   },
   feesContainer: {
     marginTop: 15,
     marginBottom: 20,
-    borderTopWidth: 1,
-    borderBottomWidth: 2,
-    borderTopColor: '#ddd',
-    borderBottomColor: '#ddd',
-    paddingVertical: 12,
+    paddingHorizontal: 10,
   },
   feeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 8,
-    paddingHorizontal: 0,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#ddd',
     alignItems: 'flex-start',
   },
   feeNameColumn: {
     flex: 1,
+    paddingRight: 15,
   },
   feeName: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#333',
-    flex: 1,
     fontWeight: '500',
   },
   feeAmount: {
-    fontSize: 13,
-    color: '#333',
+    fontSize: 12,
+    color: '#000',
     fontWeight: '600',
     textAlign: 'right',
-    minWidth: 100,
+    minWidth: 80,
   },
   feeFormula: {
-    fontSize: 11,
-    color: '#999',
+    fontSize: 10,
+    color: '#666',
     fontWeight: '400',
+    marginTop: 2,
   },
   feeTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingTop: 12,
-    paddingBottom: 0,
+    paddingTop: 10,
+    paddingBottom: 8,
     marginTop: 8,
     borderTopWidth: 2,
-    borderTopColor: '#333',
+    borderTopColor: '#000',
   },
   feeTotalLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#000',
   },
   feeTotalAmount: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     color: '#000',
     textAlign: 'right',
   },
   paymentOptionTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
-    color: '#e65100',
-    marginTop: 18,
-    marginBottom: 10,
+    color: '#006d3c',
+    marginTop: 15,
+    marginBottom: 6,
+    paddingHorizontal: 10,
   },
   paymentOptionContainer: {
-    backgroundColor: '#f5f5f5',
-    borderLeftWidth: 4,
-    borderLeftColor: '#ffa000',
-    padding: 14,
-    marginBottom: 12,
-    borderRadius: 4,
+    backgroundColor: '#f9f9f9',
+    borderLeftWidth: 3,
+    borderLeftColor: '#006d3c',
+    padding: 12,
+    marginBottom: 10,
+    marginHorizontal: 10,
+    borderRadius: 2,
   },
   paymentAmount: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#000',
-    marginBottom: 6,
+    color: '#006d3c',
+    marginBottom: 4,
   },
   paymentNote: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#666',
-    lineHeight: 18,
+    lineHeight: 16,
     fontWeight: '400',
   },
   installmentRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 8,
-    paddingHorizontal: 0,
+    paddingHorizontal: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#ddd',
     alignItems: 'center',
   },
   installmentLabel: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#333',
     fontWeight: '500',
-    flex: 0.3,
+    flex: 0.35,
   },
   installmentDate: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#666',
-    flex: 0.4,
+    flex: 0.35,
     textAlign: 'center',
   },
   installmentAmount: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#000',
     fontWeight: '600',
     flex: 0.3,
@@ -3545,10 +3529,12 @@ profileImagePlaceholder: {
   installmentTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: 10,
     paddingTop: 8,
+    paddingBottom: 8,
     marginTop: 8,
     borderTopWidth: 2,
-    borderTopColor: '#333',
+    borderTopColor: '#000',
   },
   installmentTotalLabel: {
     fontSize: 13,
@@ -3556,7 +3542,7 @@ profileImagePlaceholder: {
     color: '#000',
   },
   installmentTotalAmount: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: '#000',
     textAlign: 'right',

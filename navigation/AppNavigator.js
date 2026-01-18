@@ -20,8 +20,7 @@ export default function AppNavigator() {
       <Stack.Screen name="ApplicationFormScreen" component={ApplicationFormScreen} options={{headerShown:false}} />
       <Stack.Screen name="ForgotPasswordScreen" component={ForgotPasswordScreen} options={{headerShown:false}} />
       <Stack.Screen name="StudentDashboardScreen" component={StudentDashboardScreen}options={{headerShown:false}} />
-      
-    </Stack.Navigator>
+       </Stack.Navigator>
     
   );
 }
