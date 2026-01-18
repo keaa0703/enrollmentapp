@@ -21,6 +21,7 @@ import { db, auth } from "../firebase/config";
 import { sendPasswordResetEmail } from "firebase/auth";
 import CheckBox from 'expo-checkbox';
 import { updateDoc, addDoc } from "firebase/firestore";
+import { signInWithEmailAndPassword } from "firebase/auth";
 
 const LoginScreen = ({ navigation }) => {
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -43,91 +44,137 @@ const LoginScreen = ({ navigation }) => {
   };
 
   const handleLogin = async () => {
-    if (!idOrEmail || !password) {
-      Alert.alert("Missing Fields", "Please enter both ID Number and Password.");
+  if (!idOrEmail || !password) {
+    Alert.alert("Missing Fields", "Please enter both ID Number and Password.");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    const idTrimmed = idOrEmail.trim();
+    const passwordTrimmed = password.trim();
+
+    console.log("=== LOGIN ATTEMPT ===");
+    console.log("ID entered:", idTrimmed);
+
+    const studentsRef = collection(db, "students");
+
+    // Check if students collection exists
+    const allStudents = await getDocs(studentsRef);
+    console.log("Total students in database:", allStudents.size);
+
+    if (allStudents.size === 0) {
+      Alert.alert("Database Error", "No students found in database. Please contact admin.");
+      setLoading(false);
       return;
     }
 
-    setLoading(true);
-
-    try {
-      const trimmedId = idOrEmail.trim();
-      const trimmedPassword = password.trim();
-      
-      console.log("=== LOGIN ATTEMPT ===");
-      console.log("ID entered:", trimmedId);
-      console.log("Password entered:", trimmedPassword);
-
-      const studentsRef = collection(db, "students");
-      
-      // First, let's check if the collection and data exist
-      const allStudents = await getDocs(studentsRef);
-      console.log("Total students in database:", allStudents.size);
-      
-      if (allStudents.size === 0) {
-        Alert.alert("Database Error", "No students found in database. Please contact admin.");
-        setLoading(false);
-        return;
-      }
-
-      // Show sample data structure
-      if (allStudents.docs.length > 0) {
-        const sample = allStudents.docs[0].data();
-        console.log("Database field names:", Object.keys(sample));
-      }
-
-      // Try to find by studentId only first
-      const qId = query(studentsRef, where("studentId", "==", trimmedId));
-      const idResults = await getDocs(qId);
-      console.log("Students found with this ID:", idResults.size);
-
-      if (idResults.size === 0) {
-        Alert.alert("Login Failed", "Student ID not found. Please check your ID number.");
-        setLoading(false);
-        return;
-      }
-
-      // Check password
-      const foundUser = idResults.docs[0].data();
-      console.log("Found user:", foundUser.studentId);
-      console.log("Stored password:", foundUser.studentpassword);
-      console.log("Passwords match:", foundUser.studentpassword === trimmedPassword);
-
-      if (foundUser.studentpassword !== trimmedPassword) {
-        Alert.alert("Login Failed", "Incorrect password. Please try again.");
-        setLoading(false);
-        return;
-      }
-
-      // Login successful
-      const userData = foundUser;
-      console.log("✅ Login successful!");
-
-      await AsyncStorage.setItem("studentIdNumber", userData.studentId || "");
-      await AsyncStorage.setItem("studentEmail", userData.email || "");
-      await AsyncStorage.setItem(
-        "studentName",
-        `${userData.firstName || ""} ${userData.lastName || ""}`
-      );
-
-      Alert.alert("Login Successful", `Welcome back, ${userData.firstName || "Student"}!`);
-      setShowLoginModal(false);
-      
-      // Clear form
-      setIdOrEmail("");
-      setPassword("");
-      
-      navigation.navigate("StudentDashboardScreen", {
-        studentData: userData,
-        studentId: userData.studentId,
-      });
-    } catch (error) {
-      console.error("❌ Login Error:", error);
-      Alert.alert("Login Failed", `Error: ${error.message}`);
-    } finally {
-      setLoading(false);
+    // Show sample field structure for debugging
+    if (allStudents.docs.length > 0) {
+      const sample = allStudents.docs[0].data();
+      console.log("📋 Database fields:", Object.keys(sample));
+      console.log("📋 Sample data:", sample);
     }
-  };
+
+    // Support login by email or ID number
+    const isEmail = idTrimmed.includes("@");
+    let userQuery;
+    let loginType = ""; // Track which field was used for login
+
+    if (isEmail) {
+      console.log("🔍 Searching by email:", idTrimmed.toLowerCase());
+      userQuery = query(studentsRef, where("email", "==", idTrimmed.toLowerCase()));
+      loginType = "email";
+    } else {
+      // Try to determine if it's studentId or idNumber
+      // First, try idNumber
+      console.log("🔍 Searching by idNumber:", idTrimmed);
+      userQuery = query(studentsRef, where("idNumber", "==", idTrimmed));
+      loginType = "idNumber";
+    }
+
+    let results = await getDocs(userQuery);
+    console.log("Students found:", results.size);
+
+    // If no results and we searched by idNumber, try studentId
+    if (results.size === 0 && loginType === "idNumber") {
+      console.log("🔍 No results for idNumber, trying studentId:", idTrimmed);
+      userQuery = query(studentsRef, where("studentId", "==", idTrimmed));
+      results = await getDocs(userQuery);
+      loginType = "studentId";
+      console.log("Students found with studentId:", results.size);
+    }
+
+    if (results.size === 0) {
+      const friendlyError = isEmail
+        ? "Account not found. Please check your email address."
+        : "Account not found. Please check your ID number.";
+      console.warn("❌ Student not found:", idTrimmed);
+      Alert.alert("Login Failed", friendlyError);
+      setLoading(false);
+      return;
+    }
+
+    // Get student data
+    const foundUser = results.docs[0].data();
+    console.log("✅ Student found:", foundUser.idNumber || foundUser.studentId);
+    console.log("📝 Login type:", loginType);
+    console.log("📝 Password field in DB:", foundUser.password || foundUser.studentpassword);
+
+    // Check password - try both possible field names
+    const dbPassword = foundUser.password || foundUser.studentpassword;
+    console.log("Checking password:", dbPassword === passwordTrimmed);
+
+    if (dbPassword !== passwordTrimmed) {
+      console.warn("❌ Password mismatch!");
+      Alert.alert("Login Failed", "Incorrect password. Try again or use 'Forgot login password?'.");
+      setLoading(false);
+      return;
+    }
+
+    // Login successful
+    console.log("✅ Login successful!");
+
+    // Save to AsyncStorage using available fields
+    await AsyncStorage.setItem("studentIdNumber", foundUser.idNumber || foundUser.studentId || "");
+    await AsyncStorage.setItem("studentEmail", foundUser.email || "");
+    await AsyncStorage.setItem(
+      "studentName",
+      `${foundUser.firstName || ""} ${foundUser.lastName || ""}`
+    );
+
+    Alert.alert("Login Successful", `Welcome back, ${foundUser.firstName || "Student"}!`);
+    setShowLoginModal(false);
+
+    // Clear form
+    setIdOrEmail("");
+    setPassword("");
+
+    // CONDITIONAL NAVIGATION BASED ON LOGIN TYPE
+    if (loginType === "studentId") {
+      // Navigate to EnrolledStudent screen when logged in with studentId
+      console.log("→ Navigating to EnrolledStudents");
+      navigation.navigate("EnrolledStudents", {
+        studentData: foundUser,
+        studentId: foundUser.studentId,
+      });
+    } else {
+      // Navigate to StudentDashboard when logged in with idNumber or email
+      console.log("→ Navigating to StudentDashboardScreen");
+      navigation.navigate("StudentDashboardScreen", {
+        studentData: foundUser,
+        studentId: foundUser.idNumber || foundUser.studentId,
+      });
+    }
+
+  } catch (error) {
+    console.error("❌ Login Error:", error);
+    Alert.alert("Login Failed", `Error: ${error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
 
   // Add this function to handle custom password reset
 const handleResetPassword = async () => {

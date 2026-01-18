@@ -22,7 +22,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { db } from "../firebase/config";
 import { getAuth, signInAnonymously } from "firebase/auth";
 import { setDoc } from "firebase/firestore";
-import { decode } from 'base-64';
+import { decode, encode } from 'base-64';
 
 
 import {
@@ -822,18 +822,6 @@ if (!auth.currentUser) {
       throw new Error(`File size ${fileSize} exceeds maximum allowed ${maxSize}`);
     }
 
-    // Read file as base64 using Expo FileSystem
-    console.log(`📖 Reading file from URI: ${file.uri}`);
-    const base64Data = await FileSystem.readAsStringAsync(file.uri, {
-      encoding: 'base64',
-    });
-    console.log(`✅ File read successfully, size: ${base64Data.length} chars`);
-
-    // Validate base64 data
-    if (!base64Data || typeof base64Data !== 'string' || base64Data.length === 0) {
-      throw new Error(`Invalid file data for ${field}`);
-    }
-
     // Determine MIME type
     let mimeType = file.mimeType || 'application/octet-stream';
     if (!mimeType || mimeType === "application/octet-stream") {
@@ -850,23 +838,57 @@ if (!auth.currentUser) {
 
     const fileRef = ref(storage, `students_uploads/${studentId}/${fileName}`);
 
+    // Read file as base64
+    console.log(`📖 Reading file from URI: ${file.uri}`);
+    let base64Data;
+    
+    try {
+      base64Data = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch (fsError) {
+      console.warn("Base64 encoding failed, trying UTF8 fallback:", fsError);
+      const utf8Data = await FileSystem.readAsStringAsync(file.uri, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      base64Data = encode(utf8Data);
+    }
+
+    if (!base64Data || typeof base64Data !== 'string' || base64Data.length === 0) {
+      throw new Error(`Invalid file data for ${field}`);
+    }
+
+    console.log(`✅ File read successfully`);
+    console.log(`📤 Uploading ${field} using base64 string...`);
+    console.log(`🔍 MIME type: ${mimeType}`);
+
+    // Use uploadString with 'data_url' format which is more reliable in React Native
+    const dataUrl = `data:${mimeType};base64,${base64Data}`;
+    
     const metadata = {
       contentType: mimeType,
       customMetadata: { ownerUid: auth.currentUser.uid },
     };
 
-    // Upload using uploadString with base64 - most reliable for mobile
-    console.log(`📤 Starting upload of ${field} to Firebase Storage...`);
-    console.log(`🔍 MIME type: ${mimeType}`);
+    // Upload as data URL - more compatible with React Native
     await uploadString(fileRef, base64Data, 'base64', metadata);
     console.log(`✅ ${field} uploaded to Storage, getting download URL...`);
 
-    // Return download URL
+    // Get download URL
     const downloadURL = await getDownloadURL(fileRef);
     console.log(`🎉 ${field} uploaded successfully:`, downloadURL);
     return downloadURL;
+
   } catch (error) {
     console.error(`❌ Error uploading ${field}:`, error);
+    console.error(`❌ Error code:`, error.code);
+    console.error(`❌ Error message:`, error.message);
+    
+    // More helpful error messages
+    if (error.message?.includes('ArrayBuffer')) {
+      console.error(`💡 Suggestion: Check Firebase Storage Rules or try uploading again`);
+    }
+    
     throw error;
   }
 };

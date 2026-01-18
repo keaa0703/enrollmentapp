@@ -267,6 +267,21 @@ const StudentDashboard = ({ route, navigation }) => {
   const [preRegStep, setPreRegStep] = useState(0);
   const [sameAddress, setSameAddress] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const [enrollmentStart, setEnrollmentStart] = useState("");
+  const [enrollmentEnd, setEnrollmentEnd] = useState("");
+  const [appointmentStart, setAppointmentStart] = useState("");
+  const [appointmentEnd, setAppointmentEnd] = useState("");
+  const [lineupSubmitted, setLineupSubmitted] = useState(false);
+  const [registrationStatus, setRegistrationStatus] = useState(null); // Track registrationStatus from Firestore
+  const [hasCor, setHasCor] = useState(false);
+  const [canFinalize, setCanFinalize] = useState(false);
+  // Fees and payment data from systemSettings
+  const [miscFees, setMiscFees] = useState([]);
+  const [cashDiscount, setCashDiscount] = useState(0);
+  const [cashWithDiscountDate, setCashWithDiscountDate] = useState("");
+  const [cashWithoutDiscountDate, setCashWithoutDiscountDate] = useState("");
+  const [installmentDates, setInstallmentDates] = useState([]);
   const [enrollForm, setEnrollForm] = useState({
     entryLevel: "",
     semester: "",
@@ -325,6 +340,44 @@ const StudentDashboard = ({ route, navigation }) => {
 
   const isFinanceCompleted = financeCompleted(profile);
 
+  // Fetch announcement and enrollment window from Firestore (real-time listener)
+  useEffect(() => {
+    const announcementRef = doc(db, "systemSettings", "announcement");
+    const unsubscribe = onSnapshot(announcementRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setAnnouncement(data.announcement || "");
+        setEnrollmentStart(data.enrollmentStart || "");
+        setEnrollmentEnd(data.enrollmentEnd || "");
+        setAppointmentStart(data.appointmentStart || "");
+        setAppointmentEnd(data.appointmentEnd || "");
+      }
+    }, (err) => {
+      console.error("Error fetching announcement:", err);
+    });
+    
+    return () => unsubscribe();
+  }, []);
+
+  // Fetch miscellaneous fees from systemSettings (real-time listener)
+  useEffect(() => {
+    const feesRef = doc(db, "systemSettings", "miscellaneousFees");
+    const unsubscribe = onSnapshot(feesRef, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        setMiscFees(data.fees || []);
+        setCashDiscount(data.cashDiscount || 0);
+        setCashWithDiscountDate(data.cashWithDiscountDate || "");
+        setCashWithoutDiscountDate(data.cashWithoutDiscountDate || "");
+        setInstallmentDates(data.installmentDates || []);
+      }
+    }, (err) => {
+      console.error("Error fetching miscellaneous fees:", err);
+    });
+    
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     const fetchPreRegistration = async () => {
       const docRef = doc(db, "students", studentId);
@@ -357,7 +410,7 @@ const StudentDashboard = ({ route, navigation }) => {
       try {
         const q = query(
   collection(db, "students"),
-  where("studentId", "==", studentId)  // Changed from idNumber to studentId
+  where("idNumber", "==", studentId)
 );
         const querySnapshot = await getDocs(q);
 
@@ -397,6 +450,7 @@ const StudentDashboard = ({ route, navigation }) => {
           unsubscribe = onSnapshot(studentDoc.ref, (doc) => {
             if (doc.exists()) {
               const updatedData = doc.data();
+              setProfile(updatedData);
               
               if (updatedData.schedules && Array.isArray(updatedData.schedules)) {
                 const calculatedTotalUnits = Object.values(
@@ -439,9 +493,36 @@ const StudentDashboard = ({ route, navigation }) => {
                 setPreRegCompleted(true);
               }
 
+              // NEW: persist registrationStatus from Firestore and derive lineupSubmitted
+              setRegistrationStatus(updatedData.registrationStatus || null);
               if (updatedData.registrationStatus === 'submitted') {
                 setCourseLineupCompleted(true);
+                setLineupSubmitted(true);
               }
+              
+              // Check for COR (Certificate of Registration)
+              const corExists = Boolean(
+                updatedData.corPdfUrl ||
+                updatedData.corUrl ||
+                updatedData.requirements?.corUploaded ||
+                (Array.isArray(updatedData.requirements) && updatedData.requirements.includes('cor'))
+              );
+              setHasCor(corExists);
+              
+              // Compute finalization readiness
+              const financeCompleted = Boolean(
+                updatedData.paymentStatus === "paid" ||
+                updatedData.finances?.paid === true ||
+                updatedData.registrationStatus === "paid" ||
+                updatedData.financials?.paid === true
+              );
+              const finalizeReady = (
+                String(updatedData.appointment?.status || '').toLowerCase() === 'approved' &&
+                (String(updatedData.preRegistrationStatus || '').toLowerCase() === 'submitted' || updatedData.preRegistrationStatus === 'complete') &&
+                corExists &&
+                financeCompleted
+              );
+              setCanFinalize(Boolean(finalizeReady));
             }
           });
 
@@ -462,6 +543,15 @@ const StudentDashboard = ({ route, navigation }) => {
       }
     };
   }, [studentId]);
+
+  // Helper function to check if enrollment is currently open
+  const isEnrollmentOpen = () => {
+    if (!enrollmentStart || !enrollmentEnd) return false;
+    const start = new Date(enrollmentStart);
+    const end = new Date(enrollmentEnd);
+    const now = new Date();
+    return now >= start && now <= end;
+  };
 
   const getCurrentAnnouncement = () => {
     if (isFinanceCompleted) {
@@ -1166,7 +1256,7 @@ const StudentDashboard = ({ route, navigation }) => {
         return (
           <View style={styles.card}>
            
-            <Text style={styles.sectionTitle}>Pre-Registration</Text>
+          
 
             {!isBooked ? (
               <View style={styles.warningCard}>
@@ -1182,10 +1272,10 @@ const StudentDashboard = ({ route, navigation }) => {
               </View>
             ) : preRegCompleted ? (
               <View style={styles.completionCard}>
-                <Text style={styles.completionTitle}>Profile Information Complete</Text>
+                <Text style={styles.completionTitle}>Course lineup is available</Text>
                 <Text style={styles.completionMessage}>
-                  You have already done with Profile Information.{'\n'}
-                  Please wait for your Course Line-up.
+                  Course lineup is available. Please review your course line-up.{'\n'}
+                
                 </Text>
               </View>
             ) : (
@@ -1412,20 +1502,48 @@ const StudentDashboard = ({ route, navigation }) => {
           sum + (parseFloat(row.units) || 0), 0
         );
 
+        // Calculate miscellaneous fees total (same logic as FinanceScreen)
+        let miscFeesTotal = 0;
+        const feeRowsCalculated = (fees) => {
+          return (fees || []).map((fee) => {
+            let amount = 0;
+            let formula = "";
+            
+            if (fee.formula && fee.formula.toLowerCase().includes("units") && typeof fee.amount === "number") {
+              amount = finalTotalUnits * fee.amount;
+              formula = `(${finalTotalUnits} units X ${fee.amount})`;
+            } else if (fee.perUnit !== undefined) {
+              amount = finalTotalUnits * fee.perUnit;
+              formula = `(${finalTotalUnits} units X ${fee.perUnit})`;
+            } else if (fee.formula) {
+              formula = fee.formula;
+              amount = fee.amount || 0;
+            } else {
+              amount = fee.amount || 0;
+            }
+            
+            miscFeesTotal += amount;
+            return { ...fee, amount, formula };
+          });
+        };
+        
+        const calculatedFees = feeRowsCalculated(miscFees || []);
+        const totalWithDiscount = miscFeesTotal - cashDiscount;
+
         return (
           <ScrollView style={styles.finalEnrollmentContainer} showsVerticalScrollIndicator={false}>
             <View style={styles.finalEnrollmentCard}>
         
               <Text style={styles.congratsTitle}>You are now officially enrolled</Text>
               <Text style={styles.congratsSubtitle}>
-                Your Certificate of Registration is ready for download.
+                Click the button to download your registration form.
               </Text>
               
               <TouchableOpacity
                 style={styles.downloadButton}
                 onPress={handleDownloadCertificate}
               >
-                <Text style={styles.downloadButtonText}>DOWNLOAD CERTIFICATE</Text>
+                <Text style={styles.downloadButtonText}>DOWNLOAD</Text>
               </TouchableOpacity>
 
               <View style={styles.certificatePreview}>
@@ -1447,6 +1565,10 @@ const StudentDashboard = ({ route, navigation }) => {
                   <Text style={styles.certInfoText}>
                     <Text style={styles.certInfoLabel}>Program: </Text>
                     {profile?.program}
+                  </Text>
+                  <Text style={styles.certInfoText}>
+                    <Text style={styles.certInfoLabel}>Semester: </Text>
+                    {profile?.preRegistration?.semester || "First Semester"}
                   </Text>
                   <Text style={styles.certInfoText}>
                     <Text style={styles.certInfoLabel}>Year Level: </Text>
@@ -1510,12 +1632,92 @@ const StudentDashboard = ({ route, navigation }) => {
                   </View>
                 </ScrollView>
 
+                {/* Miscellaneous Fees Section */}
+                <Text style={styles.certSectionTitle}>MISCELLANEOUS FEES</Text>
+                <View style={styles.feesContainer}>
+                  {miscFees && miscFees.length > 0 ? (
+                    <>
+                      {calculatedFees.map((fee, idx) => (
+                        <View key={idx} style={styles.feeRow}>
+                          <View style={styles.feeNameColumn}>
+                            <Text style={styles.feeName}>
+                              {fee.name || fee.label || fee.description || `Fee ${idx + 1}`}
+                            </Text>
+                            {fee.formula && <Text style={styles.feeFormula}>{fee.formula}</Text>}
+                          </View>
+                          <Text style={styles.feeAmount}>
+                            ₱ {(fee.amount || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      ))}
+                      <View style={styles.feeTotalRow}>
+                        <Text style={styles.feeTotalLabel}>Total:</Text>
+                        <Text style={styles.feeTotalAmount}>₱ {miscFeesTotal.toFixed(2)}</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={{ color: '#888', textAlign: 'center', paddingVertical: 20 }}>
+                      Miscellaneous fees data not available.
+                    </Text>
+                  )}
+                </View>
+
+                {/* Payment Options */}
+                {miscFees && miscFees.length > 0 && (
+                  <>
+                    <Text style={styles.certSectionTitle}>PAYMENT OPTIONS</Text>
+                    
+                    <View style={styles.paymentOptionContainer}>
+                      <Text style={styles.paymentOptionTitle}>OPTION 1: CASH PAYMENT WITH DISCOUNT</Text>
+                      <Text style={styles.paymentAmount}>₱ {totalWithDiscount.toFixed(2)}</Text>
+                      <Text style={styles.paymentNote}>If full payment is made on or before {cashWithDiscountDate || "July 26, 2025"}</Text>
+                    </View>
+
+                    <View style={styles.paymentOptionContainer}>
+                      <Text style={styles.paymentOptionTitle}>OPTION 2: CASH PAYMENT WITHOUT DISCOUNT</Text>
+                      <Text style={styles.paymentAmount}>₱ {miscFeesTotal.toFixed(2)}</Text>
+                      <Text style={styles.paymentNote}>If full payment is made after {cashWithoutDiscountDate || "July 26, 2025"}</Text>
+                    </View>
+
+                    <View style={styles.paymentOptionContainer}>
+                      <Text style={styles.paymentOptionTitle}>OPTION 3: INSTALLMENT PAYMENT</Text>
+                      {(() => {
+                        const installmentAmount = (miscFeesTotal / 5).toFixed(2);
+                        const installments = [
+                          { label: 'Downpayment', date: installmentDates?.[0] },
+                          { label: '1st Installment', date: installmentDates?.[1] },
+                          { label: '2nd Installment', date: installmentDates?.[2] },
+                          { label: '3rd Installment', date: installmentDates?.[3] },
+                          { label: '4th Installment', date: installmentDates?.[4] },
+                        ];
+                        return (
+                          <>
+                            {installments.map((inst, idx) => (
+                              <View key={idx} style={styles.installmentRow}>
+                                <Text style={styles.installmentLabel}>{inst.label}</Text>
+                                <Text style={styles.installmentDate}>
+                                  {inst.date ? new Date(inst.date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : 'TBA'}
+                                </Text>
+                                <Text style={styles.installmentAmount}>₱ {installmentAmount}</Text>
+                              </View>
+                            ))}
+                            <View style={styles.installmentTotalRow}>
+                              <Text style={styles.installmentTotalLabel}>Total:</Text>
+                              <Text style={styles.installmentTotalAmount}>₱ {miscFeesTotal.toFixed(2)}</Text>
+                            </View>
+                          </>
+                        );
+                      })()}
+                    </View>
+                  </>
+                )}
+
                 <View style={styles.certNotice}>
                   <Text style={styles.certNoticeTitle}>IMPORTANT NOTICE:</Text>
                   <Text style={styles.certNoticeText}>
                     1. Students with requirement deficiency will be placed as a PROBATIONARY STUDENT.{'\n'}
-                    2. This registration form serves as the student's proof of enrollment.{'\n'}
-                    3. This computer-generated REGISTRATION FORM has been electronically approved.
+                    2. This registration form serves as the student's proof of enrollment. Students must attend only classes/sections as indicated on the registration form.{'\n'}
+                    3. This computer-generated REGISTRATION FORM has been electronically approved by the Student, Program Head/SHS Principal, College Treasurer, and College Registrar. No signature required.
                   </Text>
                 </View>
               </View>
@@ -1523,6 +1725,7 @@ const StudentDashboard = ({ route, navigation }) => {
           </ScrollView>
         );
       
+
       default:
         const currentAnnouncement = getCurrentAnnouncement();
         
@@ -1531,12 +1734,23 @@ const StudentDashboard = ({ route, navigation }) => {
             
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>Information</Text>
-              <Text style={styles.infoText}>Full Name: {profile?.firstName} {profile?.lastName}</Text>
-              <Text style={styles.infoText}>ID Number: {profile?.idNumber}</Text>
-              <Text style={styles.infoText}>Program: {profile?.program}</Text>
+              <View style={styles.infoContainer}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Full Name:</Text>
+                  <Text style={styles.infoValue}>{profile?.firstName} {profile?.lastName}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>ID Number:</Text>
+                  <Text style={styles.infoValue}>{profile?.idNumber}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Program:</Text>
+                  <Text style={styles.infoValue}>{profile?.program}</Text>
+                </View>
+              </View>
             </View>
 
-            {isBooked && bookingDetails && (
+            {isBooked && bookingDetails && appointmentStatus !== "approved" && appointmentStatus !== "disapproved" && (
               <View style={styles.card}>
                 <Text style={styles.sectionTitle}>Your Assessment Schedule</Text>
                 <View style={styles.scheduleInfo}>
@@ -1551,17 +1765,77 @@ const StudentDashboard = ({ route, navigation }) => {
               <View style={styles.cardHeader}>
                 <Text style={styles.sectionTitle}>Announcement</Text>
               </View>
-              <View style={styles.announcementContent}>
-                <Text style={styles.announcementText}>
-                  {currentAnnouncement.title}
+              <View style={styles.announcementBox}>
+                <Text style={styles.announcementTitle}>
+                  {announcement || "No announcement at this time."}
                 </Text>
-                <TouchableOpacity
-                  style={[styles.assessButton, { backgroundColor: currentAnnouncement.buttonColor }]}
-                  onPress={currentAnnouncement.buttonAction}
-                >
-                  <Text style={styles.assessButtonText}>{currentAnnouncement.buttonText}</Text>
-                </TouchableOpacity>
+                <Text style={styles.announcementStatus}>
+                  Enrollment is {isEnrollmentOpen() ? 'OPEN' : 'CLOSED'}
+                </Text>
               </View>
+
+              {isEnrollmentOpen() ? (
+                <>
+                  {canFinalize ? (
+                    <>
+                      <Text style={styles.announcementMessage}>
+                        You are now officially enrolled! Please check your email for your student portal.
+                      </Text>
+                    </>
+                  ) : preRegCompleted ? (
+                    <>
+                      <Text style={styles.announcementMessage}>
+                        {lineupSubmitted 
+                          ? "Your miscellaneous fees is now available. Please review your Finance"
+                          : (profile?.schedules && profile.schedules.length > 0)
+                          ? "Course lineup is available. Please review your course line-up"
+                          : "Profile Information Complete.\nPlease wait for your Course Line-up."}
+                      </Text>
+                      {(profile?.schedules && profile.schedules.length > 0) && !lineupSubmitted && (
+                        <TouchableOpacity
+                          style={[styles.assessButton, { backgroundColor: "#ff9900", marginTop: 15 }]}
+                          onPress={() => setActiveScreen('courses')}
+                        >
+                          <Text style={styles.assessButtonText}>VIEW COURSE LINE-UP</Text>
+                        </TouchableOpacity>
+                      )}
+                    </>
+                  ) : appointmentStatus === "approved" ? (
+                    <>
+                      <Text style={styles.announcementMessage}>
+                        Your assessment has been approved.
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.assessButton, { backgroundColor: "#ff9900", marginTop: 15 }]}
+                        onPress={() => setActiveScreen('preregistration')}
+                      >
+                        <Text style={styles.assessButtonText}>PROCEED TO ENROLLMENT</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : appointmentStatus === "disapproved" ? (
+                    <>
+                      <Text style={styles.announcementMessage}>
+                        We regret to inform you that your assessment has been disapproved.{"\n"}
+                        You can retry your exam by booking a new appointment in Assessment.{"\n"}
+                        Please contact the Guidance Office for more information.{"\n"}
+                        <Text style={{fontWeight: 'bold'}}>guidance@mac.com</Text>
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.announcementMessage}>
+                        Assessment is now open for AY 2025-2026 - First Semester
+                      </Text>
+                      <TouchableOpacity
+                        style={[styles.assessButton, { backgroundColor: "#ff9900", marginTop: 15 }]}
+                        onPress={() => setActiveScreen('assessment')}
+                      >
+                        <Text style={styles.assessButtonText}>PROCEED TO ASSESSMENT</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+                </>
+              ) : null}
             </View>
           </>
         );
@@ -1612,23 +1886,74 @@ const StudentDashboard = ({ route, navigation }) => {
     }
   };
 
-  const handleDownloadCertificate = async () => {
+
+
+// Modern Expo SDK 54+ FileSystem API
+// Import at the top of your file:
+// import { File } from 'expo-file-system';
+// OR use legacy import: import * as FileSystem from 'expo-file-system/legacy';
+
+const handleDownloadCertificate = async () => {
   try {
-    if (!profile?.certificateUrl && !profile?.certificatePath) {
+    console.log("=== Certificate Download Started ===");
+    
+    // Check multiple possible field names for the certificate
+    let downloadUrl = null;
+    let certificatePath = null;
+    
+    const possibleUrlFields = [
+      'certificateUrl',
+      'corUrl',
+      'corPdfUrl', 
+      'registrationCertificateUrl',
+      'certificate',
+      'cor'
+    ];
+    
+    const possiblePathFields = [
+      'certificatePath',
+      'corPath',
+      'corPdfPath',
+      'registrationCertificatePath'
+    ];
+    
+    // Try to find the certificate URL
+    for (const field of possibleUrlFields) {
+      if (profile?.[field]) {
+        downloadUrl = profile[field];
+        console.log(`Found certificate URL in field: ${field}`);
+        break;
+      }
+    }
+    
+    // Try to find the certificate path
+    for (const field of possiblePathFields) {
+      if (profile?.[field]) {
+        certificatePath = profile[field];
+        console.log(`Found certificate path in field: ${field}`);
+        break;
+      }
+    }
+    
+    // If no URL or path found, show error
+    if (!downloadUrl && !certificatePath) {
       Alert.alert(
         "Certificate Not Available",
-        "Your Certificate of Registration is not yet available. Please contact the admin."
+        `Your Certificate of Registration is not yet generated.\n\n` +
+        `Payment Status: ${profile?.paymentStatus || 'Unknown'}\n` +
+        `Registration Status: ${profile?.registrationStatus || 'Unknown'}\n\n` +
+        `Please contact the admin if you have already completed payment.`
       );
       return;
     }
 
-    let downloadUrl = profile.certificateUrl;
-
     // Get download URL from Firebase Storage if we only have the path
-    if (!downloadUrl && profile.certificatePath) {
+    if (!downloadUrl && certificatePath) {
       try {
-        const certRef = storageRef(storage, profile.certificatePath);
+        console.log("Getting download URL from path:", certificatePath);
+        const certRef = storageRef(storage, certificatePath);
         downloadUrl = await getDownloadURL(certRef);
+        console.log("Successfully got download URL");
         
         // Update profile with the URL for future use
         if (studentDocRef) {
@@ -1638,110 +1963,72 @@ const StudentDashboard = ({ route, navigation }) => {
         }
       } catch (error) {
         console.error("Error getting download URL:", error);
-        Alert.alert("Error", "Could not retrieve certificate. Please contact support.");
+        Alert.alert(
+          "Error", 
+          `Could not retrieve certificate from storage.\n\nError: ${error.message}`
+        );
         return;
       }
     }
 
     if (!downloadUrl) {
-      Alert.alert("Error", "Certificate URL not found.");
+      Alert.alert("Error", "Certificate URL could not be determined.");
       return;
     }
 
-    console.log("Download URL:", downloadUrl);
+    console.log("Certificate URL ready:", downloadUrl);
 
-    // Check if we have file system permissions
-    const { status } = await FileSystem.getInfoAsync(FileSystem.documentDirectory);
-    if (!status) {
-      Alert.alert("Error", "Cannot access file system.");
-      return;
-    }
-
-    // Generate unique filename
-    const timestamp = new Date().getTime();
-    const fileName = `COR_${profile?.idNumber}_${timestamp}.pdf`;
-    const fileUri = `${FileSystem.documentDirectory}${fileName}`;
-
-    console.log("Downloading to:", fileUri);
-
-    // Show loading state
-    Alert.alert("Downloading", "Preparing your certificate...");
-
-    // Download the file
-    const downloadResult = await FileSystem.downloadAsync(
-      downloadUrl,
-      fileUri
-    );
-
-    console.log("Download result:", downloadResult);
-
-    if (downloadResult.status === 200) {
-      // Success!
+    // SIMPLEST APPROACH: Just open in browser/PDF viewer
+    // This works on all platforms without complex downloads
+    const canOpen = await Linking.canOpenURL(downloadUrl);
+    
+    if (canOpen) {
+      await Linking.openURL(downloadUrl);
+      
       Alert.alert(
-        "Download Successful! ✓",
-        `Your Certificate of Registration has been downloaded.\n\nFile: ${fileName}\n\nLocation: Documents folder`,
-        [
-          { 
-            text: "OK",
-            style: "default"
-          },
-          {
-            text: "View File",
-            onPress: async () => {
-              try {
-                // Try to open the file
-                const canOpen = await Linking.canOpenURL(downloadResult.uri);
-                if (canOpen) {
-                  await Linking.openURL(downloadResult.uri);
-                } else {
-                  // Fallback: Open in browser
-                  await Linking.openURL(downloadUrl);
-                }
-              } catch (err) {
-                console.error("Error opening file:", err);
-                // Last resort: open original URL in browser
-                await Linking.openURL(downloadUrl);
-              }
-            }
-          }
-        ]
+        "Certificate Opened! 📄",
+        "Your Certificate of Registration has been opened.\n\n" +
+        "To save it:\n" +
+        "• On Android: Tap the download icon in your browser\n" +
+        "• On iOS: Tap the share icon and select 'Save to Files'\n\n" +
+        "The certificate will open in your device's PDF viewer or browser.",
+        [{ text: "Got it!" }]
       );
     } else {
-      throw new Error(`Download failed with status: ${downloadResult.status}`);
+      throw new Error("Cannot open URL");
     }
 
   } catch (error) {
-    console.error("Certificate download error:", error);
-    console.error("Error details:", JSON.stringify(error, null, 2));
+    console.error("Certificate error:", error);
     
+    // Fallback: Show URL to user
     Alert.alert(
-      "Download Failed",
-      "Unable to download the certificate file. Would you like to view it online instead?",
+      "Certificate Ready",
+      "Click 'Open Certificate' to view and download your Certificate of Registration.",
       [
+        { text: "Cancel", style: "cancel" },
         {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "View Online",
+          text: "Open Certificate",
           onPress: async () => {
             try {
-              let viewUrl = profile?.certificateUrl;
+              // Try all possible URL fields
+              let viewUrl = profile?.certificateUrl || 
+                           profile?.corUrl || 
+                           profile?.corPdfUrl ||
+                           profile?.certificate ||
+                           profile?.cor;
               
-              if (!viewUrl && profile?.certificatePath) {
-                const certRef = storageRef(storage, profile.certificatePath);
+              // If still no URL, try getting from path
+              if (!viewUrl && (profile?.certificatePath || profile?.corPath)) {
+                const path = profile?.certificatePath || profile?.corPath;
+                const certRef = storageRef(storage, path);
                 viewUrl = await getDownloadURL(certRef);
               }
               
               if (viewUrl) {
-                const supported = await Linking.canOpenURL(viewUrl);
-                if (supported) {
-                  await Linking.openURL(viewUrl);
-                } else {
-                  Alert.alert("Error", "Cannot open certificate URL.");
-                }
+                await Linking.openURL(viewUrl);
               } else {
-                Alert.alert("Error", "Certificate URL not found.");
+                Alert.alert("Error", "Certificate URL not found. Please contact admin.");
               }
             } catch (err) {
               console.error("Error opening URL:", err);
@@ -1753,6 +2040,56 @@ const StudentDashboard = ({ route, navigation }) => {
     );
   }
 };
+
+// ALTERNATIVE: If you need actual file download with new SDK 54 API
+// You would need to use this approach (more complex):
+/*
+const handleDownloadCertificateWithNewAPI = async () => {
+  try {
+    // ... (same URL retrieval code as above)
+    
+    if (!downloadUrl) return;
+
+    const fileName = `COR_${profile?.idNumber}_${Date.now()}.pdf`;
+    
+    // Fetch the file
+    const response = await fetch(downloadUrl);
+    if (!response.ok) throw new Error('Download failed');
+    
+    const blob = await response.blob();
+    
+    // Convert to base64
+    const reader = new FileReader();
+    reader.readAsDataURL(blob);
+    
+    reader.onloadend = async () => {
+      const base64data = reader.result;
+      
+      // Share using expo-sharing
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        // Create temporary file
+        const fileUri = `${FileSystem.cacheDirectory}${fileName}`;
+        
+        // Write base64 to file (using legacy API for now)
+        await FileSystem.writeAsStringAsync(fileUri, base64data.split(',')[1], {
+          encoding: FileSystem.EncodingType.Base64
+        });
+        
+        // Share the file
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/pdf',
+          dialogTitle: 'Save Certificate'
+        });
+      }
+    };
+    
+  } catch (error) {
+    console.error("Download error:", error);
+    Alert.alert("Error", "Failed to download certificate.");
+  }
+};
+*/
 
   if (loading) {
     return (
@@ -2199,7 +2536,26 @@ profileImagePlaceholder: {
     fontSize: 16,
     fontWeight: "bold",
     marginBottom: 12,
-    color: "#333",
+    color: "#006d3c",
+  },
+  infoContainer: {
+    marginTop: 8,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    marginBottom: 10,
+    alignItems: 'flex-start',
+  },
+  infoLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#333',
+    minWidth: 80,
+  },
+  infoValue: {
+    fontSize: 14,
+    color: '#333',
+    flex: 1,
   },
   infoText: {
     fontSize: 14,
@@ -2208,6 +2564,34 @@ profileImagePlaceholder: {
   },
   cardHeader: {
     marginBottom: 10,
+  },
+  announcementBox: {
+    backgroundColor: '#fffbeb',
+    borderWidth: 2,
+    borderColor: '#fbbf24',
+    borderRadius: 8,
+    padding: 20,
+    marginVertical: 15,
+  },
+  announcementTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#b45309',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  announcementStatus: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#059669',
+    textAlign: 'center',
+  },
+  announcementMessage: {
+    fontSize: 14,
+    color: '#333',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 20,
   },
   announcementContent: {
     marginTop: 5,
@@ -3043,6 +3427,139 @@ profileImagePlaceholder: {
     fontSize: 13,
     color: '#333',
     lineHeight: 22,
+  },
+  feesContainer: {
+    marginTop: 15,
+    marginBottom: 20,
+    borderTopWidth: 1,
+    borderBottomWidth: 2,
+    borderTopColor: '#ddd',
+    borderBottomColor: '#ddd',
+    paddingVertical: 12,
+  },
+  feeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    alignItems: 'flex-start',
+  },
+  feeNameColumn: {
+    flex: 1,
+  },
+  feeName: {
+    fontSize: 13,
+    color: '#333',
+    flex: 1,
+    fontWeight: '500',
+  },
+  feeAmount: {
+    fontSize: 13,
+    color: '#333',
+    fontWeight: '600',
+    textAlign: 'right',
+    minWidth: 100,
+  },
+  feeFormula: {
+    fontSize: 11,
+    color: '#999',
+    fontWeight: '400',
+  },
+  feeTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 12,
+    paddingBottom: 0,
+    marginTop: 8,
+    borderTopWidth: 2,
+    borderTopColor: '#333',
+  },
+  feeTotalLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+  },
+  feeTotalAmount: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#000',
+    textAlign: 'right',
+  },
+  paymentOptionTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#e65100',
+    marginTop: 18,
+    marginBottom: 10,
+  },
+  paymentOptionContainer: {
+    backgroundColor: '#f5f5f5',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ffa000',
+    padding: 14,
+    marginBottom: 12,
+    borderRadius: 4,
+  },
+  paymentAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 6,
+  },
+  paymentNote: {
+    fontSize: 12,
+    color: '#666',
+    lineHeight: 18,
+    fontWeight: '400',
+  },
+  installmentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    alignItems: 'center',
+  },
+  installmentLabel: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: '500',
+    flex: 0.3,
+  },
+  installmentDate: {
+    fontSize: 12,
+    color: '#666',
+    flex: 0.4,
+    textAlign: 'center',
+  },
+  installmentAmount: {
+    fontSize: 12,
+    color: '#000',
+    fontWeight: '600',
+    flex: 0.3,
+    textAlign: 'right',
+  },
+  installmentTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: 8,
+    marginTop: 8,
+    borderTopWidth: 2,
+    borderTopColor: '#333',
+  },
+  installmentTotalLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000',
+  },
+  installmentTotalAmount: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#000',
+    textAlign: 'right',
   },
 });
 export default StudentDashboard;
